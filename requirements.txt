@@ -1,0 +1,5 @@
+# CyberSentry dependencies (all free). Install with:  pip install -r requirements.txt
+streamlit>=1.45
+pandas>=2.2
+# Only needed to run the automated tests (python -m pytest)
+pytest>=8.0

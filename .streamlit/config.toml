@@ -1,0 +1,6 @@
+[browser]
+# CyberSentry sends nothing anywhere, so Streamlit's anonymous usage statistics are switched off too.
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#2a78d6"
