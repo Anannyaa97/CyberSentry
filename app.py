@@ -14,6 +14,7 @@ Security rules followed here:
   * Reports use "defanged" copies (hxxp://example[.]com) so they cannot be clicked by accident.
 """
 
+import html
 import logging
 from datetime import datetime
 
@@ -376,7 +377,7 @@ def make_gauge(score: int, level: str) -> go.Figure:
         },
     ))
     fig.update_layout(
-        **_base_layout(height=230, margin=dict(t=20, b=0, l=20, r=20))
+        **_base_layout(height=230, margin=dict(t=20, b=0, l=20, r=40))
     )
     return fig
 
@@ -618,9 +619,9 @@ def render_result(result, idx=0):
                 st.markdown(
                     f'<div class="cs-indicator">'
                     f'<strong style="color:#c8d8e8">+{indicator.points} pts &nbsp;·&nbsp; '
-                    f'{escape_markdown(indicator.title)}</strong><br>'
+                    f'{html.escape(str(indicator.title))}</strong><br>'
                     f'<span style="color:#6a8aaa;font-size:0.88rem;">'
-                    f'{escape_markdown(indicator.explanation)}</span>'
+                    f'{html.escape(str(indicator.explanation))}</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -635,7 +636,7 @@ def render_result(result, idx=0):
     st.markdown("<div class='cs-section'>What to do</div>", unsafe_allow_html=True)
     rec_html = "".join(
         f'<div style="padding:0.3rem 0; border-bottom:1px solid #1a3050; '
-        f'color:#c8d8e8; font-size:0.9rem;">→ {escape_markdown(text)}</div>'
+        f'color:#c8d8e8; font-size:0.9rem;">→ {html.escape(str(text))}</div>'
         for text in result.recommendations
     )
     st.markdown(f'<div class="cs-card">{rec_html}</div>', unsafe_allow_html=True)
@@ -803,8 +804,11 @@ def render_dashboard():
 
     with area_col:
         st.markdown("<div class='cs-section'>Score over time</div>", unsafe_allow_html=True)
-        st.plotly_chart(make_score_area(history), use_container_width=True,
-                        config={"displayModeBar": False}, key="score_area")
+        if len(history) < 2:
+            st.caption("Analyze at least 2 URLs to see a trend.")
+        else:
+            st.plotly_chart(make_score_area(history), use_container_width=True,
+                            config={"displayModeBar": False}, key="score_area")
 
     with rank_col:
         st.markdown("<div class='cs-section'>Top triggered rules</div>", unsafe_allow_html=True)
@@ -813,7 +817,7 @@ def render_dashboard():
             for rule_name, count in top.items():
                 st.markdown(
                     f'<div class="cs-rank-item">'
-                    f'<span class="cs-rank-name">{escape_markdown(rule_name)}</span>'
+                    f'<span class="cs-rank-name">{html.escape(str(rule_name))}</span>'
                     f'<span class="cs-rank-val">{count}</span>'
                     f'</div>',
                     unsafe_allow_html=True,
