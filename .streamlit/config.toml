@@ -3,4 +3,9 @@
 gatherUsageStats = false
 
 [theme]
-primaryColor = "#2a78d6"
+base              = "dark"
+primaryColor      = "#3b82f6"          # blue accent — used for buttons and focus rings
+backgroundColor   = "#0f1117"          # near-black page background
+secondaryBackgroundColor = "#1c2130"   # slightly lighter surface (sidebar, cards)
+textColor         = "#e2e8f0"          # off-white body text
+font              = "sans serif"

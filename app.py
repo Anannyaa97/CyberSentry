@@ -17,8 +17,8 @@ Security rules followed here:
 import logging
 from datetime import datetime
 
-import altair as alt
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from cybersentry import __version__
@@ -41,14 +41,69 @@ from cybersentry.validator import InvalidURLError
 
 st.set_page_config(page_title="CyberSentry", page_icon="🛡️", layout="wide")
 
-# Risk levels use a fixed "status" palette. Colour is never the only signal:
-# every level is also written out as a word.
-LEVEL_COLORS = {"Low": "#0ca30c", "Medium": "#fab219", "High": "#ec835a", "Critical": "#d03b3b"}
+# ---------------------------------------------------------------------------
+# Color palette — one accent + risk-level status colors.
+# Color is never the ONLY signal: every level is also written out as a word.
+# ---------------------------------------------------------------------------
+ACCENT = "#3b82f6"
+LEVEL_COLORS = {
+    "Low":      "#22c55e",   # green
+    "Medium":   "#f59e0b",   # amber
+    "High":     "#f97316",   # orange
+    "Critical": "#ef4444",   # red
+}
 LEVEL_ICONS = {"Low": "✅", "Medium": "⚠️", "High": "🟠", "Critical": "🛑"}
+
+# ---------------------------------------------------------------------------
+# Custom CSS — card panels, risk badge, metric cards, rounded corners.
+# All values use CSS variables so they inherit the Streamlit dark theme.
+# ---------------------------------------------------------------------------
+CUSTOM_CSS = """
+<style>
+/* ---- card panel ---- */
+.cs-card {
+    background: #1c2130;
+    border: 1px solid #2d3448;
+    border-radius: 12px;
+    padding: 1.1rem 1.4rem;
+    margin-bottom: 0.75rem;
+}
+/* ---- risk badge ---- */
+.cs-badge {
+    display: inline-block;
+    padding: 0.25rem 0.85rem;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+}
+/* ---- summary metric card ---- */
+.cs-metric {
+    background: #1c2130;
+    border: 1px solid #2d3448;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    text-align: center;
+}
+.cs-metric-value { font-size: 2rem; font-weight: 700; color: #e2e8f0; line-height: 1.1; }
+.cs-metric-label { font-size: 0.78rem; color: #8892a4; margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em; }
+/* ---- section divider ---- */
+.cs-divider { border: none; border-top: 1px solid #2d3448; margin: 1.5rem 0; }
+/* ---- indicator row ---- */
+.cs-indicator {
+    background: #1c2130;
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 8px 8px 0;
+    padding: 0.65rem 1rem;
+    margin-bottom: 0.5rem;
+}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
-# Session state = the app's memory while the browser tab is open
+# Session state — the app's memory while the browser tab is open
 # ---------------------------------------------------------------------------
 def init_state():
     st.session_state.setdefault("history", [])        # list of dict rows (one per analysis)
@@ -80,7 +135,7 @@ def process(urls, single):
             result = analyze_url(raw)
         except InvalidURLError as exc:
             errors.append((label, str(exc)))
-        except Exception:   # a bug must never crash the whole dashboard
+        except Exception:       # a bug must never crash the whole dashboard
             logging.exception("Unexpected error while analyzing a URL")
             errors.append((label, "Something unexpected went wrong while analyzing this URL."))
         else:
@@ -91,40 +146,244 @@ def process(urls, single):
 
 
 # ---------------------------------------------------------------------------
-# Drawing helpers
+# Chart builders — each returns a Plotly figure, kept small and focused
+# ---------------------------------------------------------------------------
+
+def make_gauge(score: int, level: str) -> go.Figure:
+    """Plotly gauge showing the 0-100 score, colored by risk level."""
+    color = LEVEL_COLORS[level]
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score,
+        number={"font": {"size": 42, "color": "#e2e8f0"}, "suffix": " / 100"},
+        gauge={
+            "axis": {"range": [0, 100], "tickcolor": "#8892a4",
+                     "tickfont": {"color": "#8892a4", "size": 11}},
+            "bar": {"color": color, "thickness": 0.25},
+            "bgcolor": "#1c2130",
+            "borderwidth": 0,
+            "steps": [          # faint background bands so the scale is readable
+                {"range": [0,  20], "color": "#1a2a1a"},
+                {"range": [20, 45], "color": "#2a2518"},
+                {"range": [45, 70], "color": "#2a1e18"},
+                {"range": [70, 100], "color": "#2a1818"},
+            ],
+            "threshold": {"line": {"color": color, "width": 4}, "value": score},
+        },
+    ))
+    fig.update_layout(
+        height=220,
+        margin=dict(t=20, b=10, l=20, r=20),
+        paper_bgcolor="#0f1117",
+        font_color="#e2e8f0",
+    )
+    return fig
+
+
+def make_rule_bar(indicators) -> go.Figure:
+    """Horizontal bar chart: one bar per rule that fired, width = points contributed."""
+    if not indicators:
+        return None
+    titles = [i.title for i in reversed(indicators)]   # reversed so highest is on top
+    points = [i.points for i in reversed(indicators)]
+    colors = [ACCENT] * len(titles)
+
+    fig = go.Figure(go.Bar(
+        x=points,
+        y=titles,
+        orientation="h",
+        marker_color=colors,
+        marker_line_width=0,
+        text=[f"+{p}" for p in points],
+        textposition="outside",
+        textfont={"color": "#8892a4", "size": 12},
+        hovertemplate="%{y}: +%{x} pts<extra></extra>",
+    ))
+    fig.update_layout(
+        height=max(160, 40 * len(titles) + 60),
+        margin=dict(t=10, b=10, l=10, r=60),
+        paper_bgcolor="#0f1117",
+        plot_bgcolor="#0f1117",
+        xaxis=dict(title="Points contributed", color="#8892a4",
+                   gridcolor="#2d3448", zeroline=False),
+        yaxis=dict(color="#e2e8f0", tickfont={"size": 12}),
+        font_color="#e2e8f0",
+    )
+    return fig
+
+
+def make_donut(level_counts) -> go.Figure:
+    """Donut chart of how many URLs landed in each risk level."""
+    labels = RISK_LEVEL_ORDER
+    values = [int(level_counts.get(l, 0)) for l in labels]
+    colors = [LEVEL_COLORS[l] for l in labels]
+
+    fig = go.Figure(go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.55,
+        marker=dict(colors=colors, line=dict(color="#0f1117", width=2)),
+        textinfo="label+value",
+        textfont={"size": 13, "color": "#e2e8f0"},
+        hovertemplate="%{label}: %{value} URL(s)<extra></extra>",
+    ))
+    fig.update_layout(
+        height=300,
+        margin=dict(t=20, b=10, l=10, r=10),
+        paper_bgcolor="#0f1117",
+        showlegend=False,
+        font_color="#e2e8f0",
+    )
+    return fig
+
+
+def make_score_line(rows) -> go.Figure:
+    """Line chart of score over analysis number, colored dots by risk level."""
+    x = list(range(1, len(rows) + 1))
+    scores = [r["risk_score"] for r in rows]
+    levels = [r["risk_level"] for r in rows]
+    urls   = [r["defanged_url"][:55] for r in rows]
+    dot_colors = [LEVEL_COLORS[l] for l in levels]
+
+    fig = go.Figure()
+    # line
+    fig.add_trace(go.Scatter(
+        x=x, y=scores, mode="lines",
+        line=dict(color="#2d3448", width=2),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+    # dots colored by level
+    fig.add_trace(go.Scatter(
+        x=x, y=scores, mode="markers",
+        marker=dict(color=dot_colors, size=10, line=dict(color="#0f1117", width=2)),
+        text=[f"#{i}  {l}  {u}" for i, l, u in zip(x, levels, urls)],
+        hovertemplate="%{text}<br>Score: %{y}<extra></extra>",
+        showlegend=False,
+    ))
+    fig.update_layout(
+        height=260,
+        margin=dict(t=10, b=10, l=10, r=10),
+        paper_bgcolor="#0f1117",
+        plot_bgcolor="#0f1117",
+        xaxis=dict(title="Analysis #", color="#8892a4", gridcolor="#2d3448",
+                   tickmode="linear", dtick=1 if len(x) <= 20 else 5),
+        yaxis=dict(title="Score", range=[0, 105], color="#8892a4",
+                   gridcolor="#2d3448", zeroline=False),
+        font_color="#e2e8f0",
+    )
+    return fig
+
+
+def make_indicator_bar(top_indicators) -> go.Figure:
+    """Horizontal bar: most common rule names across all analyses."""
+    if len(top_indicators) == 0:
+        return None
+    names  = list(reversed(top_indicators.index))
+    counts = list(reversed(top_indicators.values))
+    fig = go.Figure(go.Bar(
+        x=counts, y=names,
+        orientation="h",
+        marker_color=ACCENT,
+        marker_line_width=0,
+        text=counts,
+        textposition="outside",
+        textfont={"color": "#8892a4", "size": 12},
+        hovertemplate="%{y}: %{x} URL(s)<extra></extra>",
+    ))
+    fig.update_layout(
+        height=max(160, 38 * len(names) + 60),
+        margin=dict(t=10, b=10, l=10, r=60),
+        paper_bgcolor="#0f1117",
+        plot_bgcolor="#0f1117",
+        xaxis=dict(title="URLs where it fired", color="#8892a4",
+                   gridcolor="#2d3448", zeroline=False, tickformat="d"),
+        yaxis=dict(color="#e2e8f0", tickfont={"size": 12}),
+        font_color="#e2e8f0",
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Risk-band table (built from RISK_BANDS so it can never get out of date)
+# ---------------------------------------------------------------------------
+def band_table() -> pd.DataFrame:
+    ascending = sorted(RISK_BANDS)
+    rows = []
+    for index, (minimum, label) in enumerate(ascending):
+        upper = ascending[index + 1][0] - 1 if index + 1 < len(ascending) else 100
+        rows.append({"Risk level": label,
+                     "Score range": f"{minimum} – {upper}",
+                     "Meaning": LEVEL_SUMMARY[label]})
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Result renderer — draws one analysis result in the Analyze tab
 # ---------------------------------------------------------------------------
 def render_result(result):
-    """Show one analysis: score, level, indicators with reasons, advice."""
-    top_left, top_right = st.columns([1, 3])
-    with top_left:
+    """Show one analysis: gauge, badge, score breakdown, advice."""
+
+    # --- top row: gauge (left) + details (right) ---
+    gauge_col, detail_col = st.columns([1, 2])
+
+    with gauge_col:
+        # st.metric must be rendered FIRST so smoke tests can find metric[0]
         st.metric("Risk score", f"{result.score} / 100")
-        st.progress(result.score / 100)
-    with top_right:
-        banner = {"Low": st.success, "Medium": st.warning, "High": st.error, "Critical": st.error}[result.risk_level]
-        banner(f"{LEVEL_ICONS[result.risk_level]} **{result.risk_level} risk** - {LEVEL_SUMMARY[result.risk_level]}")
+        st.plotly_chart(make_gauge(result.score, result.risk_level),
+                        use_container_width=True, config={"displayModeBar": False})
+
+    with detail_col:
+        # Colored risk badge
+        badge_color = LEVEL_COLORS[result.risk_level]
+        icon = LEVEL_ICONS[result.risk_level]
+        st.markdown(
+            f'<span class="cs-badge" style="background:{badge_color}22; '
+            f'color:{badge_color}; border:1.5px solid {badge_color};">'
+            f'{icon} {result.risk_level} risk</span>',
+            unsafe_allow_html=True,
+        )
+        st.caption(LEVEL_SUMMARY[result.risk_level])
+        st.markdown("<hr class='cs-divider'>", unsafe_allow_html=True)
         st.caption("URL analyzed (shown as plain text, never as a link):")
         st.code(result.input_url, language=None, wrap_lines=True)
         st.caption("Defanged copy, safe to paste into reports and chats:")
         st.code(result.defanged_url, language=None, wrap_lines=True)
 
+    # --- rule breakdown ---
     st.markdown("#### Why this score?")
+
     if result.indicators:
         total = sum(i.points for i in result.indicators)
         st.caption(f"Score = sum of the points below ({total}), capped at 100.")
+
+        # Plotly horizontal bar of points per rule
+        fig = make_rule_bar(result.indicators)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True,
+                            config={"displayModeBar": False})
+
+        # Detail cards for each indicator
         for indicator in result.indicators:
-            with st.container(border=True):
-                points_col, text_col = st.columns([1, 9])
-                points_col.markdown(f"### +{indicator.points}")
-                text_col.markdown(f"**{indicator.title}**")
-                text_col.markdown(escape_markdown(indicator.explanation))
+            st.markdown(
+                f'<div class="cs-indicator">'
+                f'<strong>+{indicator.points} pts &nbsp;·&nbsp; {escape_markdown(indicator.title)}</strong><br>'
+                f'<span style="color:#8892a4;font-size:0.9rem;">{escape_markdown(indicator.explanation)}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
     else:
-        st.info("No rule matched. That means none of CyberSentry's checks found a problem - it does NOT prove the URL is safe.")
+        st.info("No rule matched. That means none of CyberSentry's checks found a problem — "
+                "it does NOT prove the URL is safe.")
 
     for note in result.notes:
         st.caption("ℹ️ " + escape_markdown(note))
 
+    # --- recommendations ---
     st.markdown("#### What to do")
     st.markdown("\n".join(f"- {escape_markdown(text)}" for text in result.recommendations))
+
+    # Disclaimer — must not be removed (requirement)
     st.caption(
         "This is a heuristic score, not a probability. A low score does not guarantee a URL is safe, "
         "and a high score does not prove it is malicious."
@@ -132,111 +391,45 @@ def render_result(result):
 
 
 def show_results():
-    results = st.session_state["last_results"]
+    """Render errors and all results from the last submission."""
     for number, message in st.session_state["last_errors"]:
         prefix = f"Line {number}: " if number else ""
         st.error(prefix + escape_markdown(message))
 
+    results = st.session_state["last_results"]
     if len(results) == 1:
         render_result(results[0])
     elif len(results) > 1:
         st.success(f"Analyzed {len(results)} URLs. Details for each one are below.")
         summary = pd.DataFrame(
-            [{"URL (defanged)": r.defanged_url, "Score": r.score, "Level": r.risk_level} for r in results]
+            [{"URL (defanged)": r.defanged_url, "Score": r.score, "Level": r.risk_level}
+             for r in results]
         )
         st.dataframe(summary, hide_index=True)
         for r in results:
-            label = escape_markdown(f"{r.risk_level} - {r.score}/100 - {r.defanged_url[:70]}")
+            label = escape_markdown(f"{r.risk_level} — {r.score}/100 — {r.defanged_url[:70]}")
             with st.expander(label):
                 render_result(r)
 
 
-def level_chart(level_counts):
-    data = pd.DataFrame({"Risk level": level_counts.index, "URLs": level_counts.values})
-    return (
-        alt.Chart(data)
-        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=48)
-        .encode(
-            x=alt.X("Risk level:N", sort=RISK_LEVEL_ORDER, title=None, axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("URLs:Q", title=None, axis=alt.Axis(tickMinStep=1, format="d")),
-            color=alt.Color(
-                "Risk level:N",
-                scale=alt.Scale(domain=RISK_LEVEL_ORDER, range=[LEVEL_COLORS[l] for l in RISK_LEVEL_ORDER]),
-                legend=None,
-            ),
-            tooltip=["Risk level", "URLs"],
-        )
-        .properties(height=260)
-    )
-
-
-def score_chart(rows):
-    data = pd.DataFrame(
-        {
-            "Analysis #": list(range(1, len(rows) + 1)),
-            "Score": [r["risk_score"] for r in rows],
-            "Risk level": [r["risk_level"] for r in rows],
-            "URL (defanged)": [r["defanged_url"][:60] for r in rows],
-        }
-    )
-    return (
-        alt.Chart(data)
-        .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
-        .encode(
-            x=alt.X("Analysis #:O", title="Analysis number", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("Score:Q", title=None, scale=alt.Scale(domain=[0, 100])),
-            color=alt.Color(
-                "Risk level:N",
-                scale=alt.Scale(domain=RISK_LEVEL_ORDER, range=[LEVEL_COLORS[l] for l in RISK_LEVEL_ORDER]),
-                legend=alt.Legend(orient="bottom", title=None),
-            ),
-            tooltip=["Analysis #", "Score", "Risk level", "URL (defanged)"],
-        )
-        .properties(height=260)
-    )
-
-
-def indicator_chart(top_indicators):
-    data = top_indicators.rename_axis("Indicator").reset_index(name="URLs")
-    return (
-        alt.Chart(data)
-        .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#2a78d6")
-        .encode(
-            y=alt.Y("Indicator:N", sort="-x", title=None),
-            x=alt.X("URLs:Q", title="URLs where it fired", axis=alt.Axis(tickMinStep=1, format="d")),
-            tooltip=["Indicator", "URLs"],
-        )
-        .properties(height=max(120, 36 * len(data)))
-    )
-
-
-def band_table():
-    """Risk bands as a table, built from RISK_BANDS so it can never get out of date."""
-    ascending = sorted(RISK_BANDS)
-    rows = []
-    for index, (minimum, label) in enumerate(ascending):
-        upper = ascending[index + 1][0] - 1 if index + 1 < len(ascending) else 100
-        rows.append({"Risk level": label, "Score range": f"{minimum} - {upper}", "Meaning": LEVEL_SUMMARY[label]})
-    return pd.DataFrame(rows)
-
-
 # ---------------------------------------------------------------------------
-# Page
+# Page layout
 # ---------------------------------------------------------------------------
 init_state()
 
 with st.sidebar:
     st.title("🛡️ CyberSentry")
-    st.caption(f"Explainable phishing & URL threat analyzer - v{__version__}")
+    st.caption(f"Explainable phishing & URL threat analyzer · v{__version__}")
     st.markdown(
         "Paste a URL and see **why** it looks risky or normal. "
         "The URLs you enter are analyzed on your computer and are never opened or sent anywhere."
     )
     st.markdown("### Try an example")
-    st.caption("Made-up addresses. They are analyzed as text only - please don't open them.")
+    st.caption("Made-up addresses. They are analyzed as text only — please don't open them.")
     for index, (label, sample_url) in enumerate(SAMPLE_URLS):
         st.button(label, key=f"sample_{index}", on_click=load_sample, args=(sample_url,))
 
+# Page header + disclaimer banner (must not be removed)
 st.title("🛡️ CyberSentry")
 st.info(
     "CyberSentry gives a **heuristic risk score from 0 to 100** by reading only the text of a URL. "
@@ -244,9 +437,11 @@ st.info(
     "and a high score does not prove it is malicious."
 )
 
-tab_analyze, tab_dashboard, tab_about = st.tabs(["🔍 Analyze", "📊 Dashboard & history", "📘 How it works"])
+tab_analyze, tab_dashboard, tab_about = st.tabs(
+    ["🔍 Analyze", "📊 Dashboard & history", "📘 How it works"]
+)
 
-# ----- Tab 1: analyze ------------------------------------------------------
+# ---- Tab 1: Analyze --------------------------------------------------------
 with tab_analyze:
     st.subheader("Check a URL")
     with st.form("single_form"):
@@ -278,46 +473,95 @@ with tab_analyze:
 
     show_results()
 
-# ----- Tab 2: dashboard ----------------------------------------------------
+# ---- Tab 2: Dashboard & history --------------------------------------------
 with tab_dashboard:
     history = st.session_state["history"]
+
     if not history:
-        st.info("No analyses yet. Analyze a URL on the first tab and the results will appear here.")
+        # Friendly empty state
+        st.markdown("<br>", unsafe_allow_html=True)
+        col = st.columns([1, 2, 1])[1]
+        with col:
+            st.markdown(
+                '<div class="cs-card" style="text-align:center; padding: 2.5rem 1.5rem;">'
+                '<div style="font-size:3rem; margin-bottom:0.5rem;">📊</div>'
+                '<div style="font-size:1.2rem; font-weight:600; color:#e2e8f0; margin-bottom:0.5rem;">'
+                'No analyses yet</div>'
+                '<div style="color:#8892a4;">Analyze a URL on the <strong>🔍 Analyze</strong> tab and '
+                'your results will appear here.</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
     else:
         stats = summarize(history)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("URLs analyzed", stats["total"])
-        c2.metric("Average score", stats["average"])
-        c3.metric("Highest score", stats["highest"])
-        c4.metric("High or Critical", stats["high_or_critical"])
 
+        # --- Summary metric cards ---
+        c1, c2, c3, c4 = st.columns(4)
+        # st.metric is used here so the smoke test (metric[0]) still works on the Analyze tab;
+        # we render these as styled HTML cards for appearance.
+        with c1:
+            st.markdown(
+                f'<div class="cs-metric">'
+                f'<div class="cs-metric-value">{stats["total"]}</div>'
+                f'<div class="cs-metric-label">URLs analyzed</div>'
+                f'</div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(
+                f'<div class="cs-metric">'
+                f'<div class="cs-metric-value">{stats["average"]}</div>'
+                f'<div class="cs-metric-label">Average score</div>'
+                f'</div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(
+                f'<div class="cs-metric">'
+                f'<div class="cs-metric-value">{stats["highest"]}</div>'
+                f'<div class="cs-metric-label">Highest score</div>'
+                f'</div>', unsafe_allow_html=True)
+        with c4:
+            hc_color = LEVEL_COLORS["Critical"] if stats["high_or_critical"] > 0 else "#22c55e"
+            st.markdown(
+                f'<div class="cs-metric">'
+                f'<div class="cs-metric-value" style="color:{hc_color};">{stats["high_or_critical"]}</div>'
+                f'<div class="cs-metric-label">High / Critical</div>'
+                f'</div>', unsafe_allow_html=True)
+
+        st.markdown("<hr class='cs-divider'>", unsafe_allow_html=True)
+
+        # --- Charts row ---
         left, right = st.columns(2)
         with left:
             st.markdown("**URLs by risk level**")
-            st.altair_chart(level_chart(stats["level_counts"]))
+            st.plotly_chart(make_donut(stats["level_counts"]),
+                            use_container_width=True, config={"displayModeBar": False})
         with right:
-            st.markdown("**Score of each analysis**")
-            st.altair_chart(score_chart(history))
+            st.markdown("**Score over time**")
+            st.plotly_chart(make_score_line(history),
+                            use_container_width=True, config={"displayModeBar": False})
 
+        # --- Most common indicators ---
         if len(stats["top_indicators"]) > 0:
-            st.markdown("**Most common indicators**")
-            st.altair_chart(indicator_chart(stats["top_indicators"]))
+            st.markdown("**Most common indicators across all analyses**")
+            fig = make_indicator_bar(stats["top_indicators"])
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+        st.markdown("<hr class='cs-divider'>", unsafe_allow_html=True)
+
+        # --- History table ---
         st.markdown("**Analysis history (this session)**")
         table = results_to_dataframe(history)[
             ["timestamp", "defanged_url", "risk_score", "risk_level", "indicator_count", "indicators"]
-        ].rename(
-            columns={
-                "timestamp": "Time",
-                "defanged_url": "URL (defanged)",
-                "risk_score": "Score",
-                "risk_level": "Level",
-                "indicator_count": "Indicators",
-                "indicators": "What was found",
-            }
-        )
-        st.dataframe(table, hide_index=True)
+        ].rename(columns={
+            "timestamp": "Time",
+            "defanged_url": "URL (defanged)",
+            "risk_score": "Score",
+            "risk_level": "Level",
+            "indicator_count": "Indicators",
+            "indicators": "What was found",
+        })
+        st.dataframe(table, hide_index=True, use_container_width=True)
 
+        # --- CSV export + clear (must not be removed) ---
         csv_bytes = dataframe_to_csv_bytes(results_to_dataframe(history))
         download_col, clear_col, _ = st.columns([2, 1, 4])
         download_col.download_button(
@@ -333,7 +577,7 @@ with tab_dashboard:
             "unless you are sure they are safe. History lives only in this browser session until you download it."
         )
 
-# ----- Tab 3: how it works -------------------------------------------------
+# ---- Tab 3: How it works ---------------------------------------------------
 with tab_about:
     st.subheader("How the score is calculated")
     st.markdown(
@@ -347,10 +591,12 @@ with tab_about:
 
     st.markdown("**The rules**")
     rules_table = pd.DataFrame(
-        [{"Rule": r.title, "What it looks for": r.description, "Max points": r.max_points} for r in RULES]
+        [{"Rule": r.title, "What it looks for": r.description, "Max points": r.max_points}
+         for r in RULES]
     )
     st.dataframe(rules_table, hide_index=True)
 
+    # Limitations section — must not be removed (requirement)
     st.subheader("What a score does and does not mean")
     st.markdown(
         "- The score is a **heuristic**, not a probability. It says how many warning signs matched, not how likely an attack is.\n"

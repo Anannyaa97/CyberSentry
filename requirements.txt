@@ -1,5 +1,6 @@
 # CyberSentry dependencies (all free). Install with:  pip install -r requirements.txt
 streamlit>=1.45
 pandas>=2.2
+plotly>=5.20          # interactive charts in the dashboard (gauge, donut, bar, line)
 # Only needed to run the automated tests (python -m pytest)
 pytest>=8.0
