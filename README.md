@@ -7,7 +7,6 @@ indicator that fired with its points and a plain-English reason, and suggests wh
 > **Important:** the score is a *heuristic*, **not a probability**. A low score does **not** guarantee a URL is
 > safe, and a high score does **not** prove it is malicious. See [Limitations](#limitations).
 
-Built for the [Cybersecurity Bootcamp] by [Your Name].
 
 <!-- After you take your screenshots (see docs/screenshots/README.md), uncomment these lines:
 ![Analyze tab](docs/screenshots/01-analyze-result.png)
