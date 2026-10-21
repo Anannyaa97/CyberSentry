@@ -52,7 +52,8 @@ def test_sample_button_analyzes_and_clear_history_empties_it():
     app = click(app, "Ordinary website")
     assert not app.exception
     assert len(app.session_state["history"]) == 1
-    app = click(app, "Clear history")
+    # Button label changed to include an emoji prefix in the redesign
+    app = click(app, "🗑️ Clear history")
     assert app.session_state["history"] == []
 
 
