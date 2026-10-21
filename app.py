@@ -425,8 +425,7 @@ def make_donut(level_counts) -> go.Figure:
         values=values,
         hole=0.60,
         marker=dict(colors=colors, line=dict(color="#060d1a", width=3)),
-        textinfo="label+value",
-        textfont={"size": 13, "color": "#c8d8e8"},
+        textinfo="none",
         hovertemplate="%{label}: %{value} URL(s)<extra></extra>",
     ))
     # Center annotation
@@ -543,10 +542,10 @@ def make_avg_per_category(rows) -> go.Figure:
     fig.update_layout(
         **_base_layout(
             height=max(160, 38 * len(names) + 60),
-            margin=dict(t=10, b=10, l=10, r=50),
+            margin=dict(t=10, b=10, l=160, r=50),
             xaxis=dict(title="URLs where fired", color="#6a8aaa",
                        gridcolor="#1a3050", zeroline=False, tickformat="d"),
-            yaxis=dict(color="#c8d8e8", tickfont={"size": 11}),
+            yaxis=dict(color="#c8d8e8", tickfont={"size": 11}, automargin=True),
         )
     )
     return fig
@@ -569,7 +568,7 @@ def band_table() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Result renderer — draws one analysis result in the Analyze tab
 # ---------------------------------------------------------------------------
-def render_result(result):
+def render_result(result, idx=0):
     """Show one analysis: gauge (left) + badge/details (right) + breakdown + advice."""
 
     # --- two-column top row ---
@@ -579,7 +578,8 @@ def render_result(result):
         # st.metric is rendered so smoke tests (metric[0]) can find it
         st.metric("Risk score", f"{result.score} / 100")
         st.plotly_chart(make_gauge(result.score, result.risk_level),
-                        use_container_width=True, config={"displayModeBar": False})
+                        use_container_width=True, config={"displayModeBar": False},
+                        key=f"gauge_{idx}")
 
     with detail_col:
         badge_color = LEVEL_COLORS[result.risk_level]
@@ -610,7 +610,8 @@ def render_result(result):
             fig = make_rule_bar(result.indicators)
             if fig:
                 st.plotly_chart(fig, use_container_width=True,
-                                config={"displayModeBar": False})
+                                config={"displayModeBar": False},
+                                key=f"rulebar_{idx}")
 
         with card_col:
             for indicator in result.indicators:
@@ -654,7 +655,7 @@ def show_results():
 
     results = st.session_state["last_results"]
     if len(results) == 1:
-        render_result(results[0])
+        render_result(results[0], idx=0)
     elif len(results) > 1:
         st.success(f"Analyzed {len(results)} URLs. Details for each one are below.")
         summary = pd.DataFrame(
@@ -662,10 +663,10 @@ def show_results():
              for r in results]
         )
         st.dataframe(summary, hide_index=True)
-        for r in results:
+        for i, r in enumerate(results):
             label = escape_markdown(f"{r.risk_level} — {r.score}/100 — {r.defanged_url[:70]}")
             with st.expander(label):
-                render_result(r)
+                render_result(r, idx=i)
 
 
 # ---------------------------------------------------------------------------
@@ -803,7 +804,7 @@ def render_dashboard():
     with area_col:
         st.markdown("<div class='cs-section'>Score over time</div>", unsafe_allow_html=True)
         st.plotly_chart(make_score_area(history), use_container_width=True,
-                        config={"displayModeBar": False})
+                        config={"displayModeBar": False}, key="score_area")
 
     with rank_col:
         st.markdown("<div class='cs-section'>Top triggered rules</div>", unsafe_allow_html=True)
@@ -829,7 +830,7 @@ def render_dashboard():
         st.markdown("<div class='cs-section'>Risk level distribution</div>",
                     unsafe_allow_html=True)
         st.plotly_chart(make_donut(stats["level_counts"]), use_container_width=True,
-                        config={"displayModeBar": False})
+                        config={"displayModeBar": False}, key="level_donut")
 
     with b_col:
         st.markdown("<div class='cs-section'>Rules by frequency</div>",
@@ -837,7 +838,7 @@ def render_dashboard():
         fig = make_avg_per_category(history)
         if fig:
             st.plotly_chart(fig, use_container_width=True,
-                            config={"displayModeBar": False})
+                            config={"displayModeBar": False}, key="category_bar")
         else:
             st.caption("Not enough data yet.")
 
@@ -870,13 +871,14 @@ def render_dashboard():
         type="primary",
     )
     clr_col.button("🗑️ Clear history", on_click=clear_history, key="dash_clear")
-    if demo_col.button("📂 Load demo data — made-up URLs", key="dash_demo"):
+    if demo_col.button("📂 Load demo data", key="dash_demo"):
         load_demo_data()
         st.rerun()
 
     st.caption(
         "The CSV contains the original URLs and defanged copies. Do not open or click URLs from a report "
-        "unless you are sure they are safe. History lives only in this browser session until you download it."
+        "unless you are sure they are safe. History lives only in this browser session until you download it. "
+        "Demo data contains made-up URLs for illustration only."
     )
 
 
@@ -884,7 +886,6 @@ def render_dashboard():
 # Page layout — sidebar + header + tabs
 # ---------------------------------------------------------------------------
 init_state()
-render_sidebar()
 
 # Run any pending demo load (triggered before sidebar rendered)
 run_demo = st.session_state.pop("run_demo", False)
@@ -1001,3 +1002,7 @@ with tab_about:
         "- Reports use **defanged** URLs, and CSV cells that start with `=`, `+`, `-` or `@` are neutralized (CSV injection).\n"
         "- History is kept **in memory for this browser session only**. Nothing is stored on disk unless you download the CSV."
     )
+
+# Sidebar is rendered last so its "This session" stats reflect any history
+# that was just written by process() inside the tab blocks above.
+render_sidebar()
