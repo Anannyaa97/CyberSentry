@@ -359,7 +359,7 @@ def make_gauge(score: int, level: str) -> go.Figure:
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
-        number={"font": {"size": 46, "color": "#e8f4ff", "family": "'Segoe UI', sans-serif"},
+        number={"font": {"size": 34, "color": "#e8f4ff", "family": "'Segoe UI', sans-serif"},
                 "suffix": " / 100"},
         gauge={
             "axis": {"range": [0, 100], "tickcolor": "#2d4a6a",
@@ -377,7 +377,7 @@ def make_gauge(score: int, level: str) -> go.Figure:
         },
     ))
     fig.update_layout(
-        **_base_layout(height=230, margin=dict(t=20, b=0, l=20, r=40))
+        **_base_layout(height=230, margin=dict(t=20, b=0, l=30, r=50))
     )
     return fig
 
