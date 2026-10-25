@@ -10,7 +10,7 @@ indicator that fired with its points and a plain-English reason, and suggests wh
 Built by **Anannya AK** for the **IBM SkillsBuild Cyber Security 2026** bootcamp (conducted by BharatCares).
 - - -
 
-#Live Link⛓️‍💥
+# Live Link⛓️‍💥
 https://cybersentry-skx7.onrender.com
 
 - - -
